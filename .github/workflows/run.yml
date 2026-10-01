@@ -7,15 +7,20 @@ on:
   schedule:
     - cron: '0 */4 * * *'
 
+concurrency:
+  group: telebot-loop
+  cancel-in-progress: true
+
 jobs:
   run-bot-job:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Setup Python environment
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -27,32 +32,39 @@ jobs:
     - name: Run Main Bot Script
       env:
         PYTHONUNBUFFERED: "1"
-        BOT_TOKEN: "8770611942:AAFUtYJcw0nrRsrnnUmQbzUfV2h7FbwzHQg"
-        CHANNEL_ID: "-1003201511422"
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
       run: |
+        if [ -z "$BOT_TOKEN" ] || [ -z "$CHANNEL_ID" ]; then
+          echo "::error::BOT_TOKEN / CHANNEL_ID secret missing - aborting."
+          exit 1
+        fi
         cat << 'EOF' > run_bot.py
         import os
         import time
         import telebot
+        from telebot.apihelper import ApiException
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
         BOT_TOKEN = os.getenv("BOT_TOKEN")
         CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
+        RUN_SECONDS = 12600  # 3.5h - must stay under the 4h cron interval
+
         bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-        print("--- ENGINE LIVE: STARTING POLLING ---", flush=True)
+
+        me = bot.get_me()
+        print(f"--- ENGINE LIVE as @{me.username} ---", flush=True)
 
         @bot.message_handler(commands=['start'])
         def send_welcome(message):
             try:
-                bot_username = bot.get_me().username
                 markup = InlineKeyboardMarkup()
-                admin_url = f"https://t.me/{bot_username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
+                admin_url = f"https://t.me/{me.username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
                 markup.add(InlineKeyboardButton("➕ Add Bot to Channel", url=admin_url))
-                
                 welcome_text = "👋 **Welcome!!**\n\nFiles ko bina caption ke channel me forward karne ke liye mujhe admin banayein:"
                 bot.reply_to(message, welcome_text, parse_mode='Markdown', reply_markup=markup)
-                print(f"-> Start command triggered by {message.from_user.id}", flush=True)
+                print(f"-> Start command by {message.from_user.id}", flush=True)
             except Exception as e:
                 print(f"Error start: {e}", flush=True)
 
@@ -74,16 +86,27 @@ jobs:
                 bot.reply_to(message, "✅ Successfully Uploaded to Channel!")
             except Exception as e:
                 print(f"Error media: {e}", flush=True)
-                bot.reply_to(message, f"❌ Failed: {e}")
+                try:
+                    bot.reply_to(message, f"❌ Failed: {e}")
+                except Exception:
+                    pass
 
         if __name__ == "__main__":
             start_time = time.time()
-            while time.time() - start_time < 16200: 
+            while time.time() - start_time < RUN_SECONDS:
                 try:
                     bot.polling(none_stop=True, interval=2, timeout=40)
+                except ApiException as e:
+                    if e.error_code == 409:
+                        print("!! 409 Conflict - another instance is polling. Waiting.", flush=True)
+                        time.sleep(60)
+                    else:
+                        print(f"API error {e.error_code}: {e.description}", flush=True)
+                        time.sleep(15)
                 except Exception as e:
-                    print(f"Re-polling injection due to: {e}", flush=True)
+                    print(f"Re-polling due to: {e}", flush=True)
                     time.sleep(5)
+            print("--- Loop window done, exiting cleanly ---", flush=True)
         EOF
         python run_bot.py
 
