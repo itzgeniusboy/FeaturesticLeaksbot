@@ -50,7 +50,7 @@ jobs:
                 admin_url = f"https://t.me/{bot_username}?startchannel=true&admin=post_messages+edit_messages+delete_messages"
                 markup.add(InlineKeyboardButton("➕ Add Bot to Channel", url=admin_url))
                 
-                welcome_text = "👋 **Welcome!**\n\nFiles ko bina caption ke channel me forward karne ke liye mujhe admin banayein:"
+                welcome_text = "👋 **Welcome!!**\n\nFiles ko bina caption ke channel me forward karne ke liye mujhe admin banayein:"
                 bot.reply_to(message, welcome_text, parse_mode='Markdown', reply_markup=markup)
                 print(f"-> Start command triggered by {message.from_user.id}", flush=True)
             except Exception as e:
